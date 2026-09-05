@@ -30,10 +30,16 @@ class TelemetryState:
             if not self.history:
                 return {"error": "No data available"}
                 
-            # Safely get up to N elements from the right end
-            actual_n = min(n, len(self.history))
-            # Slice the deque (from right)
-            samples = list(self.history)[-actual_n:]
+            # Copy to list to safely manipulate
+            samples = list(self.history)
+            
+            # SORT by timestamp to handle OUT OF ORDER or LATE messages
+            # Python's Timsort is highly efficient (O(N)) for nearly-sorted data
+            samples.sort(key=lambda x: x["timestamp"])
+            
+            actual_n = min(n, len(samples))
+            # Slice the list (from right) to get the most recent chronological data
+            samples = samples[-actual_n:]
             
         if not samples:
              return {"error": "No data available"}

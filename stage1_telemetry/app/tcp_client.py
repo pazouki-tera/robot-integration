@@ -35,6 +35,15 @@ async def tcp_reader_task():
                     
                     if timestamp is not None and joints is not None:
                         state.add_sample(joints, timestamp)
+                        
+                    # --- CHAOS SIMULATION (Slow Receiver) ---
+                    # 1% chance our service gets bogged down and reads slowly
+                    import random
+                    if random.random() < 0.01:
+                        delay = random.uniform(1.0, 3.0)
+                        logging.warning(f"Simulating SLOW RECEIVER: Service bogged down, sleeping for {delay:.2f}s")
+                        await asyncio.sleep(delay)
+                        
                 except json.JSONDecodeError:
                     logging.error(f"Received malformed JSON payload: {line}")
                     
