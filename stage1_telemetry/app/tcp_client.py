@@ -36,8 +36,10 @@ async def tcp_reader_task():
                     if timestamp is not None and joints is not None:
                         state.add_sample(joints, timestamp)
                         
-                    # --- CHAOS SIMULATION (Slow Receiver) ---
-                    # 1% chance our service gets bogged down and reads slowly
+                    # ARCHITECTURE NOTE (TCP Backpressure & CPU Throttling):
+                    # If this service experiences a CPU spike and reads slowly, the OS socket 
+                    # receive buffer will fill. TCP Flow Control naturally kicks in and forces 
+                    # the robot to slow down. We don't drop bytes at the app level.
                     import random
                     if random.random() < 0.01:
                         delay = random.uniform(1.0, 3.0)
@@ -45,7 +47,10 @@ async def tcp_reader_task():
                         await asyncio.sleep(delay)
                         
                 except json.JSONDecodeError:
-                    logging.error(f"Received malformed JSON payload: {line}")
+                    # ARCHITECTURE NOTE:
+                    # If the robot drops power mid-transmission, we will receive a partial, 
+                    # malformed JSON string. Catching this prevents the background loop from crashing.
+                    logging.error(f"Received malformed JSON payload (Partial message/Power loss): {line}")
                     
         except ConnectionRefusedError:
             logging.warning("Connection refused. Is the robot controller running?")

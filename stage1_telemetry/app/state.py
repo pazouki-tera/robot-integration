@@ -5,12 +5,16 @@ from typing import List, Dict, Optional
 
 class TelemetryState:
     def __init__(self, max_history: int = 1000):
-        # We use a deque for O(1) appends and automatic max length management
+        # ARCHITECTURE NOTE:
+        # A deque with a fixed maxlen provides an automatic rolling window.
+        # It guarantees O(1) time complexity for appends and prevents Out of Memory (OOM) 
+        # crashes by automatically discarding the oldest data when the limit is reached.
         self.history = collections.deque(maxlen=max_history)
         self.is_connected = False
         self.last_message_timestamp: Optional[float] = None
-        # Use a lock to ensure thread-safety when reading/writing state
-        # between the TCP asyncio task and the FastAPI worker threads
+        
+        # Threading lock ensures data integrity because the async TCP background task
+        # is writing to this state concurrently while FastAPI worker threads are reading from it.
         self.lock = threading.Lock()
         
     def update_connection_status(self, connected: bool):
@@ -33,8 +37,11 @@ class TelemetryState:
             # Copy to list to safely manipulate
             samples = list(self.history)
             
-            # SORT by timestamp to handle OUT OF ORDER or LATE messages
-            # Python's Timsort is highly efficient (O(N)) for nearly-sorted data
+            # ARCHITECTURE NOTE (Chaos Handling):
+            # Networks are unreliable; messages may arrive late or out of order.
+            # We sort by the robot's timestamp chronologically to ensure accurate math.
+            # Python's built-in sort (Timsort) is O(N) for nearly-sorted data, meaning
+            # this adds almost zero performance overhead.
             samples.sort(key=lambda x: x["timestamp"])
             
             actual_n = min(n, len(samples))
