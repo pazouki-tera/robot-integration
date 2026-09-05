@@ -39,26 +39,28 @@ Once the Telemetry Service is running, you can interact with it directly in your
 
 ---
 
-## Testing Resilience Scenarios
+## Testing Resilience Scenarios (Chaos Engineering)
 
-The assessment emphasizes how the software behaves when things go wrong. Here is how you can verify the resilience and failure handling of this service:
+To explicitly demonstrate how the software behaves when things go wrong, both the mock publisher and the telemetry service have **built-in Chaos simulations**.
 
-### Scenario 1: Normal Operation (Happy Path)
-1. Ensure both `mock_publisher.py` and the FastAPI service are running.
-2. Open your browser and navigate to the health endpoint: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health). You will see `"is_connected": true` and a very small `last_message_age_seconds` (usually under 0.1s).
-3. Navigate to [http://127.0.0.1:8000/telemetry?n=5](http://127.0.0.1:8000/telemetry?n=5). You will see the rolling window statistics correctly calculated for the last 5 samples.
+### 1. Simulated Robot Failures (Publisher Chaos)
+The `mock_publisher.py` intentionally misbehaves to mimic unreliable physical machines:
+- **Out of Order / Late Messages (2% chance):** The robot sends a message with an artificially old timestamp (delayed by 5s). Our service handles this flawlessly because the rolling window explicitly sorts samples chronologically before serving them, ensuring `O(N)` fast correction using Python's Timsort.
+- **Hard Power Off (1% chance):** The robot writes exactly half of a JSON payload and instantly kills the connection. Our service catches the resulting `JSONDecodeError`, discards the corrupt data, prevents a crash, and immediately attempts to reconnect.
+- **Network Freeze (1% chance):** The robot hangs for 3 seconds mid-transmission.
 
-### Scenario 2: Robot Controller Disconnects
-1. Go to the terminal running `mock_publisher.py` and press `Ctrl + C` to kill the mock robot.
-2. The FastAPI terminal will catch the disconnection and begin attempting to reconnect gracefully every 2 seconds without crashing.
-3. Refresh the health endpoint in your browser: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health).
-4. **Observation:** You will now see `"is_connected": false`. If you keep refreshing, you will see `last_message_age_seconds` continuously increasing, properly reflecting that data is stale.
+### 2. Simulated Slow Receiver (Client Chaos)
+To answer the prompt: *"say clearly what your service does if it cannot read messages as fast as they arrive"*, the `tcp_client.py` has a built-in bottleneck simulator.
+- **Processing Spike (1% chance):** 1% of the time, the telemetry service simulates getting bogged down and sleeps for 1-3 seconds.
+- **What happens:** Unread data safely queues in the OS TCP receive buffer. If the sleep is long enough, standard TCP flow control (backpressure) forces the publisher to wait. Once the service wakes up, it rapidly consumes the queued bytes from the OS buffer and instantly catches back up to real-time. No application-level data drops or memory leaks occur.
 
-### Scenario 3: Robot Controller Recovers
-1. Start `mock_publisher.py` again.
-2. The FastAPI service will automatically detect the server is back online and reconnect.
-3. Refresh the health endpoint in your browser again.
-4. **Observation:** `"is_connected"` returns to `true`, and the `last_message_age_seconds` drops back to near zero. No manual restart of the telemetry service was required.
+### Manual Failure Testing
+You can also manually trigger failures:
+1. Start `mock_publisher.py` and the telemetry service.
+2. Check [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) (`"is_connected": true`).
+3. Press `Ctrl + C` on the mock publisher. 
+4. Check the health endpoint again. `"is_connected"` will instantly become `false` and the `last_message_age_seconds` will continuously increase, reflecting stale data.
+5. Restart the publisher. The service will auto-reconnect without a restart, and the health will return to `true`.
 
 ---
 
